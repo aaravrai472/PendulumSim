@@ -1,3 +1,4 @@
+import math
 import pygame
 import pymunk
 
@@ -18,6 +19,12 @@ space.gravity = 0, -981
 
 def convert_coords(point):
     return int(point[0]), int(HEIGHT - point[1])
+
+def calculate_distance(p1, p2):
+    return math.sqrt((p2[1] - p1[1])**2 + (p2[0] - p1[0])**2)
+
+def calculate_angle(p1, p2):
+    return math.atan2(p2[1] - p1[1], p2[0] - p1[0])
     
 def create_pendulum():
     x = WIDTH / 3
@@ -44,6 +51,7 @@ def create_stack_scene():
     wall = pymunk.Segment(space.static_body, (780, 55), (780, 350), 1)
     for line in (floor, wall):
         line.friction = 0.3
+        line.elasticity = 0.4
     space.add(floor, wall)
 
     boxes = []
@@ -70,53 +78,79 @@ def draw_stack_scene(lines, boxes):
                     for vertex in box.get_vertices()]
         pygame.draw.polygon(display, "skyblue", vertices)
 
-def create_projectile():
+def create_ball(pos):
     mass, radius = 100, 15
     moment = pymunk.moment_for_circle(mass, 0, radius)
-    projectile_body = pymunk.Body(mass, moment, body_type=pymunk.Body.STATIC)
-    projectile_body.position = convert_coords(pygame.mouse.get_pos())
-    projectile = pymunk.Circle(projectile_body, radius)
-    projectile.friction = 0.3
-    space.add(projectile_body, projectile)
+    ball_body = pymunk.Body(body_type=pymunk.Body.STATIC)
+    ball_body.position = convert_coords(pos)
     
-    return projectile, projectile_body
+    ball = pymunk.Circle(ball_body, radius)
+    ball.friction = 0.3
+    ball.elasticity = 0.9999999
+    ball.mass = mass
+    
+    space.add(ball_body, ball)
+    
+    return ball, ball_body
 
 def draw_projectile(projectile, projectile_body):
     pygame.draw.circle(display, (255, 150, 150), convert_coords(projectile_body.position), int(projectile.radius))
 
 def main():
-    p_body, ball, joint = create_pendulum()
+    p_body, p_ball, joint = create_pendulum()
     lines, boxes = create_stack_scene()
-    projectile, projectile_body = None, None
-    font = pygame.font.Font(None, 24)
-    instructions = font.render("Space: fire ball    Esc: quit", True, "white")
     pivot = convert_coords(joint.a.local_to_world(joint.anchor_a))
-    mouse_count = 0
+    ball, ball_body = None, None
+    
+    pos = None
     
     p_body.apply_impulse_at_local_point((-4000, 0))
     
     while True:
+        line = None
+        if ball and pos:
+            line = [pos, pygame.mouse.get_pos()]
+        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_count += 1
-                
-            if mouse_count == 1 and projectile is None and projectile_body is None:
-                projectile, projectile_body = create_projectile()
             
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if ball is None or ball_body is None:
+                    pos = event.pos
+                    ball, ball_body = create_ball(pos)
+                elif pos is not None and line is not None:
+                    ball_body.body_type = pymunk.Body.DYNAMIC
+                    
+                    angle = calculate_angle(*line)
+                    force = calculate_distance(*line) * 500
+                    fx = math.cos(angle) * force
+                    fy = math.sin(angle) * force
+                    
+                    ball_body.apply_impulse_at_local_point((-fx, fy), (0, 0))
+                    pos = None
+                else:
+                    space.remove(ball, ball_body)
+                    ball, ball_body = None, None
+                    pos = None
                 
         display.fill((7, 12, 54))
+        
+        if line:
+            pygame.draw.line(display, "green", line[0], line[1], 3)
+        
         draw_stack_scene(lines, boxes)
-        if projectile is not None and projectile_body is not None:
-            draw_projectile(projectile, projectile_body)
+        
+        if ball is not None and ball_body is not None:
+            draw_projectile(ball, ball_body)
+        
         # display.blit(instructions, (10, 10))
         
         centre = convert_coords(p_body.position)
         pygame.draw.aaline(display, "white", pivot, centre)
-        pygame.draw.circle(display, "red", centre, int(ball.radius))
+        pygame.draw.circle(display, "red", centre, int(p_ball.radius))
         
         for i in range(PHYSICS_SUBSTEPS):
             space.step(PHYSICS_DT)
